@@ -88,6 +88,11 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         summary: "Inspect loaded Claude instruction memory files",
         argument_hint: None,
     },
+    SlashCommandSpec {
+        name: "init",
+        summary: "Create a starter CLAUDE.md for this repo",
+        argument_hint: None,
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +107,7 @@ pub enum SlashCommand {
     Resume { session_path: Option<String> },
     Config,
     Memory,
+    Init,
     Unknown(String),
 }
 
@@ -132,6 +138,7 @@ impl SlashCommand {
             },
             "config" => Self::Config,
             "memory" => Self::Memory,
+            "init" => Self::Init,
             other => Self::Unknown(other.to_string()),
         })
     }
@@ -195,6 +202,7 @@ pub fn handle_slash_command(
         | SlashCommand::Resume { .. }
         | SlashCommand::Config
         | SlashCommand::Memory
+        | SlashCommand::Init
         | SlashCommand::Unknown(_) => None,
     }
 }
@@ -236,6 +244,7 @@ mod tests {
         );
         assert_eq!(SlashCommand::parse("/config"), Some(SlashCommand::Config));
         assert_eq!(SlashCommand::parse("/memory"), Some(SlashCommand::Memory));
+        assert_eq!(SlashCommand::parse("/init"), Some(SlashCommand::Init));
     }
 
     #[test]
@@ -251,7 +260,8 @@ mod tests {
         assert!(help.contains("/resume <session-path>"));
         assert!(help.contains("/config"));
         assert!(help.contains("/memory"));
-        assert_eq!(slash_command_specs().len(), 10);
+        assert!(help.contains("/init"));
+        assert_eq!(slash_command_specs().len(), 11);
     }
 
     #[test]

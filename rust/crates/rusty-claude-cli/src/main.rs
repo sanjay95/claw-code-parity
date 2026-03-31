@@ -2,6 +2,7 @@ mod input;
 mod render;
 
 use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -282,6 +283,7 @@ fn run_resume_command(
         | SlashCommand::Model { .. }
         | SlashCommand::Permissions { .. }
         | SlashCommand::Clear
+        | SlashCommand::Init
         | SlashCommand::Unknown(_) => Err("unsupported resumed slash command".into()),
     }
 }
@@ -377,6 +379,7 @@ impl LiveCli {
             SlashCommand::Resume { session_path } => self.resume_session(session_path)?,
             SlashCommand::Config => Self::print_config()?,
             SlashCommand::Memory => Self::print_memory()?,
+            SlashCommand::Init => Self::run_init()?,
             SlashCommand::Unknown(name) => eprintln!("unknown slash command: /{name}"),
         }
         Ok(())
@@ -502,6 +505,11 @@ impl LiveCli {
         Ok(())
     }
 
+    fn run_init() -> Result<(), Box<dyn std::error::Error>> {
+        println!("{}", init_claude_md()?);
+        Ok(())
+    }
+
     fn compact(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let result = self.runtime.compact(CompactionConfig::default());
         let removed = result.removed_message_count;
@@ -612,6 +620,74 @@ fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
         "
 ",
     ))
+}
+
+fn init_claude_md() -> Result<String, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let claude_md = cwd.join("CLAUDE.md");
+    if claude_md.exists() {
+        return Ok(format!(
+            "init: skipped because {} already exists",
+            claude_md.display()
+        ));
+    }
+
+    let content = render_init_claude_md(&cwd);
+    fs::write(&claude_md, content)?;
+    Ok(format!("init: created {}", claude_md.display()))
+}
+
+fn render_init_claude_md(cwd: &Path) -> String {
+    let mut lines = vec![
+        "# CLAUDE.md".to_string(),
+        String::new(),
+        "This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.".to_string(),
+        String::new(),
+    ];
+
+    let mut command_lines = Vec::new();
+    if cwd.join("rust").join("Cargo.toml").is_file() {
+        command_lines.push("- Run Rust verification from `rust/`: `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`".to_string());
+    } else if cwd.join("Cargo.toml").is_file() {
+        command_lines.push("- Run Rust verification from the repo root: `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`".to_string());
+    }
+    if cwd.join("tests").is_dir() && cwd.join("src").is_dir() {
+        command_lines.push("- `src/` and `tests/` are also present; check those surfaces before removing or renaming Python-era compatibility assets.".to_string());
+    }
+    if !command_lines.is_empty() {
+        lines.push("## Verification".to_string());
+        lines.extend(command_lines);
+        lines.push(String::new());
+    }
+
+    let mut structure_lines = Vec::new();
+    if cwd.join("rust").is_dir() {
+        structure_lines.push(
+            "- `rust/` contains the Rust workspace and the active CLI/runtime implementation."
+                .to_string(),
+        );
+    }
+    if cwd.join("src").is_dir() {
+        structure_lines.push("- `src/` contains the older Python-first workspace artifacts referenced by the repo history and tests.".to_string());
+    }
+    if cwd.join("tests").is_dir() {
+        structure_lines.push("- `tests/` exercises compatibility and porting behavior across the repository surfaces.".to_string());
+    }
+    if !structure_lines.is_empty() {
+        lines.push("## Repository shape".to_string());
+        lines.extend(structure_lines);
+        lines.push(String::new());
+    }
+
+    lines.push("## Working agreement".to_string());
+    lines.push("- Prefer small, reviewable Rust changes and keep slash-command behavior aligned between the shared command registry and the CLI entrypoints.".to_string());
+    lines.push("- Do not overwrite existing CLAUDE.md content automatically; update it intentionally when repo workflows change.".to_string());
+    lines.push(String::new());
+
+    lines.join(
+        "
+",
+    )
 }
 
 fn normalize_permission_mode(mode: &str) -> Option<&'static str> {
@@ -951,11 +1027,11 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_status_line, normalize_permission_mode, parse_args, render_repl_help, CliAction,
-        SlashCommand, DEFAULT_MODEL,
+        format_status_line, normalize_permission_mode, parse_args, render_init_claude_md,
+        render_repl_help, CliAction, SlashCommand, DEFAULT_MODEL,
     };
     use runtime::{ContentBlock, ConversationMessage, MessageRole};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn defaults_to_repl_when_no_args() {
@@ -1029,6 +1105,7 @@ mod tests {
         assert!(help.contains("/resume <session-path>"));
         assert!(help.contains("/config"));
         assert!(help.contains("/memory"));
+        assert!(help.contains("/init"));
         assert!(help.contains("/exit"));
     }
 
@@ -1084,6 +1161,14 @@ mod tests {
         );
         assert_eq!(SlashCommand::parse("/config"), Some(SlashCommand::Config));
         assert_eq!(SlashCommand::parse("/memory"), Some(SlashCommand::Memory));
+        assert_eq!(SlashCommand::parse("/init"), Some(SlashCommand::Init));
+    }
+
+    #[test]
+    fn init_template_mentions_detected_rust_workspace() {
+        let rendered = render_init_claude_md(Path::new("."));
+        assert!(rendered.contains("# CLAUDE.md"));
+        assert!(rendered.contains("cargo clippy --workspace --all-targets -- -D warnings"));
     }
 
     #[test]
